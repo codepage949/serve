@@ -29,6 +29,8 @@ const MEDIA_TYPES: Record<string, string> = {
   ".gz": "application/gzip",
   ".css": "text/css",
   ".wasm": "application/wasm",
+  ".mp3": "audio/mpeg",
+  ".mp4": "video/mp4",
 };
 
 /** Returns the content-type based on the extension of a path. */
@@ -55,20 +57,82 @@ async function serveFile(
     Deno.open(filePath),
     Deno.stat(filePath),
   ]);
-  const headers = new Headers();
-  headers.set("content-length", fileInfo.size.toString());
-  const contentTypeValue = contentType(filePath);
-  if (contentTypeValue) {
-    headers.set("content-type", contentTypeValue);
+  const range = req.headers.get("range");
+
+  if (!range) {
+    const headers = new Headers();
+    headers.set("content-length", fileInfo.size.toString());
+    const contentTypeValue = contentType(filePath);
+    if (contentTypeValue) {
+      headers.set("content-type", contentTypeValue);
+    }
+    req.done.then(() => {
+      file.close();
+    });
+    return {
+      status: 200,
+      body: file,
+      headers,
+    };
+  } else {
+    let [start, end] = range.replace("bytes=", "").split("-").map(parseInt);
+    const headers = new Headers();
+    if (isNaN(start)) {
+      start = 0;
+    }
+    if (isNaN(end)) {
+      end = fileInfo.size - 1;
+    }
+    if (
+      start < 0 ||
+      start >= fileInfo.size ||
+      end >= fileInfo.size ||
+      end < start
+    ) {
+      headers.set("content-range", `*/${fileInfo.size}`);
+
+      return {
+        status: 416,
+        headers,
+      };
+    }
+    headers.set("content-length", (end - start + 1).toString());
+    headers.set("content-range", `bytes ${start}-${end}/${fileInfo.size}`)
+    const contentTypeValue = contentType(filePath);
+    if (contentTypeValue) {
+      headers.set("content-type", contentTypeValue);
+    }
+    req.done.then(() => {
+      file.close();
+    });
+    await file.seek(start, Deno.SeekMode.Start);
+    let n = 0;
+    return {
+      status: 206,
+      body: {
+        async read(p) {
+          if (end - start + 1 - n === 0) {
+            return null;
+          }
+
+          const m = (() => {
+            if (n + p.byteLength > end - start + 1) {
+              return end - start + 1 - n;
+            }
+
+            return p.byteLength;
+          })();
+
+          const nn = (await file.read(p.subarray(0, m)));
+
+          n += nn ?? 0;
+
+          return nn;
+        }
+      },
+      headers,
+    };
   }
-  req.done.then(() => {
-    file.close();
-  });
-  return {
-    status: 200,
-    body: file,
-    headers,
-  };
 }
 
 // TODO: simplify this after deno.stat and deno.readDir are fixed
@@ -141,7 +205,9 @@ function serverLog(req: ServerRequest, res: Response): void {
 }
 
 export default function serve() {
-  const addr = `${args.host ?? args.H ?? 'localhost'}:${args.port ?? args.p ?? 4507}`;
+  const addr = `${args.host ?? args.H ?? "localhost"}:${
+    args.port ?? args.p ?? 4507
+  }`;
   listenAndServe(
     addr,
     async (req): Promise<void> => {
