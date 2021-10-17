@@ -75,7 +75,9 @@ async function serveFile(
       headers,
     };
   } else {
-    let [start, end] = range.replace("bytes=", "").split("-").map(parseInt);
+    // https://medium.com/dailyjs/parseint-mystery-7c4368ef7b21
+    // do not use .map(parseInt)
+    let [start, end] = range.replace("bytes=", "").split("-").map((x) => parseInt(x));
     const headers = new Headers();
     if (isNaN(start)) {
       start = 0;
