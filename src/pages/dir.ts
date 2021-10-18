@@ -181,7 +181,7 @@ export default (dirname: string, entries: EntryInfo[]): string => {
         html`
                   <li>
                     <a
-                      href="${entry.url}"
+                      href="${entry.url + ((entry.type === "folder") ? "/" : "")}"
                       title="${entry.name}"
                       class="${entry.type} ${
           extname(entry.url).replace(
